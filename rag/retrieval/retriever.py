@@ -3,15 +3,16 @@ retrieval/retriever.py
 
 Implements the retrieval half of the pipeline:
 
-  QUERY ANALYSIS -> RETRIEVAL -> RELEVANCE CHECK -> MACHINE/MODEL
+  QUERY ANALYSIS -> QUERY EXPANSION -> RETRIEVAL -> RELEVANCE CHECK -> MACHINE/MODEL
   CONSISTENCY CHECK -> SUFFICIENCY CHECK
 
 Retrieval never relies on embeddings alone. For every query we:
   1. Detect an explicit error code via regex, if present.
   2. Detect a machine/model mention in free text, if present.
-  3. Run semantic vector search.
-  4. Boost/keep chunks that contain an exact error-code match.
-  5. Filter/prefer chunks matching the given (or detected) machine/model.
+  3. Expand the query into semantic variations (NEW).
+  4. Run semantic vector search on multiple expanded queries.
+  5. Boost/keep chunks that contain an exact error-code match.
+  6. Filter/prefer chunks matching the given (or detected) machine/model.
 
 The pipeline module (`rag/pipeline.py`) is responsible for turning the
 output of this module into ambiguous/insufficient/success decisions - this
@@ -28,6 +29,7 @@ from rag.config import (
     normalize_error_code,
 )
 from rag.embeddings.embedder import embed_query
+from rag.retrieval.query_expander import expand_query
 from rag.schemas import RetrievedChunk, ChunkMetadata
 from rag.vectorstore.vector_store import VectorStore
 
@@ -93,35 +95,61 @@ def retrieve(
     error_code: Optional[str] = None,
     top_k: int = TOP_K,
 ) -> List[RetrievedChunk]:
-    """Hybrid retrieval combining exact error-code matching with semantic
-    search, then applying machine/model preference."""
+    """Hybrid retrieval combining query expansion, exact error-code matching
+    with semantic search, then applying machine/model preference.
+    
+    Query expansion generates semantic variations of the user query, which are
+    then embedded and searched independently. Results are merged, deduplicated,
+    and ranked by relevance.
+    """
 
-    query_vector = embed_query(query)
-    raw_results = vector_store.search(query_vector, top_k=max(top_k, 20))
-
-    candidates: List[RetrievedChunk] = []
+    # Expand the query into semantic variations
+    query_variations = expand_query(query, error_code=error_code)
+    
+    # Collect all candidates from all query variations
+    all_candidates: List[RetrievedChunk] = []
+    seen_keys = set()
+    
     normalized_code = normalize_error_code(error_code) if error_code else None
+    
+    for variant in query_variations:
+        query_vector = embed_query(variant)
+        raw_results = vector_store.search(query_vector, top_k=max(top_k, 20))
+        
+        for text, meta, score in raw_results:
+            exact_match = False
+            if normalized_code:
+                page_codes = {normalize_error_code(c) for c in ERROR_CODE_REGEX.findall(text)}
+                exact_match = normalized_code in page_codes
 
-    for text, meta, score in raw_results:
-        exact_match = False
-        if normalized_code:
-            page_codes = {normalize_error_code(c) for c in ERROR_CODE_REGEX.findall(text)}
-            exact_match = normalized_code in page_codes
-
-        candidates.append(
-            RetrievedChunk(
-                text=text,
-                metadata=meta,
-                semantic_score=score,
-                exact_code_match=exact_match,
+            key = (meta.manual, meta.page, text)
+            if key in seen_keys:
+                # Keep the highest score if we've seen this before
+                for existing in all_candidates:
+                    if (existing.metadata.manual, existing.metadata.page, existing.text) == key:
+                        existing.semantic_score = max(existing.semantic_score, score)
+                        break
+                continue
+            
+            seen_keys.add(key)
+            all_candidates.append(
+                RetrievedChunk(
+                    text=text,
+                    metadata=meta,
+                    semantic_score=score,
+                    exact_code_match=exact_match,
+                )
             )
-        )
-
+    
+    candidates = all_candidates
+    
     # If an error code was given/detected but didn't turn up in the top
     # semantic results, pull in chunks that contain it explicitly - exact
     # error-code matching must never be at the mercy of embedding recall.
     if normalized_code:
         already_have = {(c.metadata.manual, c.metadata.page, c.text) for c in candidates}
+        # Use the original query for the exhaustive exact-code sweep
+        query_vector = embed_query(query)
         for text, meta, score in vector_store.search(query_vector, top_k=vector_store.index.ntotal or 1):
             key = (meta.manual, meta.page, text)
             if key in already_have:
@@ -156,7 +184,7 @@ def retrieve(
     candidates.sort(key=sort_key, reverse=True)
 
     # Deduplicate identical (manual, page, text) entries that may have been
-    # added twice (once from top-k search, once from the exact-code sweep).
+    # added twice (once from query expansion search, once from the exact-code sweep).
     seen = set()
     deduped: List[RetrievedChunk] = []
     for c in candidates:
