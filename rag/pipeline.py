@@ -17,9 +17,11 @@ Internal flow:
     QUERY ANALYSIS (error code / machine / model detection + conversation
                      context merge)
         v
+    QUERY EXPANSION (generate semantic variations for better recall)
+        v
     AMBIGUITY CHECK (error code with no resolvable machine/model)
         v
-    RETRIEVAL (hybrid: exact code + semantic + machine/model filter)
+    RETRIEVAL (hybrid: query expansion + exact code + semantic + machine/model filter)
         v
     RELEVANCE / SUFFICIENCY CHECK
         v
@@ -143,8 +145,10 @@ def troubleshoot(
             # below will naturally come back insufficient.
 
         # ------------------------------------------------------------
-        # 3. RETRIEVAL
+        # 3. RETRIEVAL (with query expansion)
         # ------------------------------------------------------------
+        # The retrieve() function now internally handles query expansion
+        # to generate semantic variations and search across them.
         retrieved = retrieve(
             query=query,
             vector_store=store,
