@@ -6,6 +6,7 @@ RAG-based intelligent machine troubleshooting assistant for technicians. This sy
 
 ```
 VH26-ALGOHOLICS/
+├── frontend/  
 ├── backend/          # FastAPI REST API server
 ├── rag/             # RAG pipeline (ingestion, retrieval, generation)
 └── README.md        # This file
