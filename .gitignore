@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Environment
+.env
+
+# Vector databases / generated data
+chroma_db/
+vectorstore/
+*.faiss
+*.pkl
+
+# Uploaded/generated files
+data/processed/
+data/uploads/
+
+# Node
+node_modules/
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
