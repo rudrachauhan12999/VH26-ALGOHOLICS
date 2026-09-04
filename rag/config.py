@@ -40,6 +40,11 @@ def _get_float(name: str, default: float) -> float:
         return default
 
 
+def _get_bool(name: str, default: bool) -> bool:
+    val = os.environ.get(name, str(default)).lower()
+    return val in ("true", "1", "yes", "on")
+
+
 # --------------------------------------------------------------------------
 # Groq (LLM generation)
 # --------------------------------------------------------------------------
@@ -102,6 +107,20 @@ ERROR_CODE_REGEX = re.compile(
     _get_str("RAG_ERROR_CODE_REGEX", r"\b(?:E|ERR|FLT|ALM)-?\d{2,4}\b"),
     re.IGNORECASE,
 )
+
+# --------------------------------------------------------------------------
+# Query Expansion (NEW)
+# --------------------------------------------------------------------------
+# Enable/disable query expansion for improved semantic recall.
+# When enabled, queries are expanded into semantic variations before
+# embedding and retrieval. This improves recall by catching synonyms,
+# alternative phrasings, and related terms.
+ENABLE_QUERY_EXPANSION: bool = _get_bool("RAG_ENABLE_QUERY_EXPANSION", True)
+
+# Maximum number of expanded query variants to search.
+# Higher values improve recall but increase latency and cost.
+# Recommended: 3-5 for good balance.
+MAX_QUERY_VARIANTS: int = _get_int("RAG_MAX_QUERY_VARIANTS", 4)
 
 # Follow-up conversation memory
 CONVERSATION_HISTORY_LIMIT: int = _get_int("RAG_CONVERSATION_HISTORY_LIMIT", 6)
